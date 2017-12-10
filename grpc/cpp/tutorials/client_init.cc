@@ -17,7 +17,7 @@ using grpc::ClientContext;
 using grpc::ClientReader;
 using grpc::ClientReaderWriter;
 using grpc::ClientWriter;
-using grpc:: CompletionQueue;
+using grpc::CompletionQueue;
 using grpc::Status;
 using service_layer::SLInitMsg;
 using service_layer::SLVersion;
@@ -31,6 +31,8 @@ class AsyncNotifChannel {
 public:
     explicit AsyncNotifChannel(std::shared_ptr<Channel> channel)
         : stub_(service_layer::SLGlobal::NewStub(channel)) {}
+
+    bool tearDown = false;
 
     // Assembles the client's payload and sends it to the server.
     void SendInitMsg(const service_layer::SLInitMsg init_msg) {
@@ -52,14 +54,31 @@ public:
         void* got_tag;
         bool ok = false;
 
-        // Block until the next result is available in the completion queue "cq".
-        while (cq_.Next(&got_tag, &ok)) {
+        unsigned int timeout = 365*24*60*60;
+        // Set timeout for API
+        std::chrono::system_clock::time_point deadline =
+            std::chrono::system_clock::now() + std::chrono::seconds(timeout);
+
+ 
+        while (!tearDown) {
+            auto nextStatus = cq_.AsyncNext(&got_tag, &ok, deadline);
             // The tag is the memory location of the call object
             ResponseHandler* responseHandler = static_cast<ResponseHandler*>(got_tag);
 
-            // Verify that the request was completed successfully. Note that "ok"
-            // corresponds solely to the request for updates introduced by Finish().
-            responseHandler->HandleResponse(ok);
+            switch(nextStatus) {
+            case grpc::CompletionQueue::GOT_EVENT:
+                 // Verify that the request was completed successfully. Note that "ok"
+                 // corresponds solely to the request for updates introduced by Finish().
+                 responseHandler->HandleResponse(ok, &cq_);
+                 break;
+             case grpc::CompletionQueue::SHUTDOWN:
+                 std::cout << "Shutdown event received for completion queue, shutdown the thread" << std::endl;
+                 delete responseHandler;
+                 tearDown = true;
+                 break;
+             case grpc::CompletionQueue::TIMEOUT:
+                 break;
+            }
         }
     }
 
@@ -67,7 +86,7 @@ private:
 
     class ResponseHandler {
     public:
-        virtual void HandleResponse(bool eventStatus) = 0;
+        virtual void HandleResponse(bool eventStatus, CompletionQueue* pcq_) = 0;
     };
 
     // struct for keeping state and data information
@@ -84,12 +103,12 @@ private:
         grpc::ClientContext context;
 
         // Storage for the status of the RPC upon completion.
-        Status status;
+        grpc::Status status;
 
         //std::unique_ptr<ClientAsyncResponseReader<HelloReply>> response_reader;
         std::unique_ptr< ::grpc::ClientAsyncReaderInterface< ::service_layer::SLGlobalNotif>> response_reader;
 
-        void HandleResponse(bool responseStatus) override {
+        void HandleResponse(bool responseStatus, CompletionQueue* pcq_) override {
             //The First completion queue entry indicates session creation and shouldn't be processed - Check?
             switch (callStatus_) {
             case CREATE:
@@ -134,8 +153,6 @@ private:
                     } else if (eventtype == static_cast<int>(service_layer::SL_GLOBAL_EVENT_TYPE_ERROR)) {
                         if (slerrstatus == service_layer::SLErrorStatus_SLErrno_SL_NOTIF_TERM) {
                             std::cout << "Received notice to terminate. Client Takeover?" << std::endl;
-                            //response_reader->Finish(&status, (void*)this);
-                            //callStatus_ = FINISH;
                         } else {
                             std::cout << "Error Not Handled " << slerrstatus << std::endl;
                         } 
@@ -154,8 +171,8 @@ private:
                 else {
                     std::cout << "RPC failed" << std::endl;
                 }
-                delete this;
-                std::exit(0);
+                std::cout << "Shutting down the completion queue" << std::endl;
+                pcq_->Shutdown();
             }
         } 
     };
