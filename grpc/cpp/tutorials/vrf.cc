@@ -2,6 +2,7 @@
 #include <memory>
 #include <string>
 #include <csignal>
+#include <sys/socket.h>
 
 #include <grpc++/grpc++.h>
 #include "sl_global.grpc.pb.h" 
@@ -11,6 +12,8 @@
 #include "sl_route_common.pb.h"
 #include "sl_route_ipv4.grpc.pb.h"
 #include "sl_route_ipv6.grpc.pb.h"
+#include "sl_route_ipv4.pb.h"
+#include "sl_route_ipv6.pb.h"
 
 #include <thread>
 #include <typeinfo>
@@ -31,31 +34,105 @@ std::mutex m_mutex;
 std::condition_variable m_condVar;
 bool m_InitSuccess;
 
+class RShuttle {
+public:
+    RShuttle(std::shared_ptr<Channel> Channel)
+        : channel(Channel) {}
+
+    std::shared_ptr<Channel> channel;
+    service_layer::SLRegOp routeOp;
+
+};
 
 class SLVrf {
 public:
-    SLVrf(std::shared_ptr<Channel> Channel,
-          service_layer::SLRegOp VrfOp)
-        : channel(Channel), vrfOp(VrfOp) {}
+    SLVrf(std::shared_ptr<Channel> Channel)
+        : channel(Channel) {}
 
 
     std::shared_ptr<Channel> channel;
-    service_layer::SLRegOp vrfOp;
-    service_layer::SLVrfRegMsg vrfMsg;
-    service_layer::SLVrfRegMsgRsp vrfMsgResp;
+    service_layer::SLRegOp vrf_op;
+    service_layer::SLVrfRegMsg vrf_msg;
+    service_layer::SLVrfRegMsgRsp vrf_msg_resp;
 
 
-    void VrfRegMsgAdd(std::string vrfName,
+    void vrfRegMsgAdd(std::string vrfName,
                       unsigned int adminDistance,
                       unsigned int vrfPurgeIntervalSeconds) {
-        service_layer::SLVrfReg* vrfReg = vrfMsg.add_vrfregmsgs();
-        vrfReg->set_vrfname(vrfName);
-        vrfReg->set_admindistance(adminDistance);
-        vrfReg->set_vrfpurgeintervalseconds(vrfPurgeIntervalSeconds);
+
+        // Get a pointer to a new vrf_reg entry in vrf_msg
+        service_layer::SLVrfReg* vrf_reg = vrf_msg.add_vrfregmsgs();
+
+        // Populate the new vrf_reg entry
+        vrf_reg->set_vrfname(vrfName);
+        vrf_reg->set_admindistance(adminDistance);
+        vrf_reg->set_vrfpurgeintervalseconds(vrfPurgeIntervalSeconds);
     }
 
+    void registerVrf(unsigned int addrFamily) {
 
-    void SendRoutev4VrfRegOp() {
+        // Send an RPC for VRF registrations
+
+        switch(addrFamily) {
+        case AF_INET:
+            std::cout << "IPv4 VRF Operation" << std::endl;
+
+            vrf_op = service_layer::SL_REGOP_REGISTER;
+            vrfOpv4();
+
+            // RPC EOF to cleanup any previous stale routes
+            vrf_op = service_layer::SL_REGOP_EOF;
+            vrfOpv4();
+
+            break;
+
+        case AF_INET6:
+            std::cout << "IPv6 VRF Operation" << std::endl;
+
+            vrf_op = service_layer::SL_REGOP_REGISTER;
+            vrfOpv6();
+
+            // RPC EOF to cleanup any previous stale routes
+            vrf_op = service_layer::SL_REGOP_EOF;
+            vrfOpv6();
+
+            break;            
+
+        default:
+            std::cout << "Invalid Address family, skipping.." << std::endl;
+            break;
+        }
+
+    }
+
+    void unregisterVrf(unsigned int addrFamily) {
+
+        //  When done with the VRFs, RPC Delete Registration
+
+        switch(addrFamily) {
+        case AF_INET:
+            std::cout << "IPv6 VRF Operation" << std::endl;
+
+            vrf_op = service_layer::SL_REGOP_UNREGISTER;
+            vrfOpv6();
+            
+            break;
+        
+        case AF_INET6:
+            std::cout << "IPv6 VRF Operation" << std::endl;
+            
+            vrf_op = service_layer::SL_REGOP_UNREGISTER;
+            vrfOpv6();
+            
+            break;
+
+        default:
+            std::cout << "Invalid Address family, skipping.." << std::endl;
+            break;
+        }
+    }
+
+    void vrfOpv4() {
 
         // Set up the RouteV4Oper Stub
         auto stub_ = service_layer::SLRoutev4Oper::NewStub(channel);
@@ -76,29 +153,29 @@ public:
 
         // Set up vrfRegMsg Operation
 
-        vrfMsg.set_oper(vrfOp);
+        vrf_msg.set_oper(vrf_op);
 
         //Issue the RPC         
 
-        status = stub_->SLRoutev4VrfRegOp(&context, vrfMsg, &vrfMsgResp);
+        status = stub_->SLRoutev4VrfRegOp(&context, vrf_msg, &vrf_msg_resp);
 
         if (status.ok()) {
             std::cout << "RPC call was successful, checking response..." << std::endl;
 
   
-            if (vrfMsgResp.statussummary().status() ==
+            if (vrf_msg_resp.statussummary().status() ==
                    service_layer::SLErrorStatus_SLErrno_SL_SUCCESS) {
 
-                std::cout << "IPv4 Vrf Operation:"<< vrfOp << " Successful" << std::endl;
+                std::cout << "IPv4 Vrf Operation:"<< vrf_op << " Successful" << std::endl;
             } else {
-                std::cout << "Error code for VRF Operation:" << vrfOp << " is 0x" << std::hex << vrfMsgResp.statussummary().status() << std::endl;
+                std::cout << "Error code for VRF Operation:" << vrf_op << " is 0x" << std::hex << vrf_msg_resp.statussummary().status() << std::endl;
 
                 // Print Partial failures within the batch if applicable
-                if (vrfMsgResp.statussummary().status() ==
+                if (vrf_msg_resp.statussummary().status() ==
                         service_layer::SLErrorStatus_SLErrno_SL_SOME_ERR) {
-                    for (int result = 0; result < vrfMsgResp.results_size(); result++) {
-                          auto slerrstatus = static_cast<int>(vrfMsgResp.results(result).errstatus().status());
-                          std::cout << "Error code for vrf " << vrfMsgResp.results(result).vrfname() << " is 0x" << std::hex << slerrstatus << std::endl;
+                    for (int result = 0; result < vrf_msg_resp.results_size(); result++) {
+                          auto slerr_status = static_cast<int>(vrf_msg_resp.results(result).errstatus().status());
+                          std::cout << "Error code for vrf " << vrf_msg_resp.results(result).vrfname() << " is 0x" << std::hex << slerr_status << std::endl;
                     }
                 } 
             }
@@ -108,7 +185,7 @@ public:
  
     }
                     
-    void SendRoutev6VrfRegOp() {
+    void vrfOpv6() {
 
         // Set up the RouteV4Oper Stub
         auto stub_ = service_layer::SLRoutev6Oper::NewStub(channel);
@@ -130,27 +207,26 @@ public:
 
         // Set up vrfRegMsg Operation
 
-        vrfMsg.set_oper(vrfOp);
+        vrf_msg.set_oper(vrf_op);
 
         //Issue the RPC         
 
-        status = stub_->SLRoutev6VrfRegOp(&context, vrfMsg, &vrfMsgResp);
+        status = stub_->SLRoutev6VrfRegOp(&context, vrf_msg, &vrf_msg_resp);
 
         if (status.ok()) {
             std::cout << "RPC call was successful, checking response...";
-            if (vrfMsgResp.statussummary().status() ==
+            if (vrf_msg_resp.statussummary().status() ==
                    service_layer::SLErrorStatus_SLErrno_SL_SUCCESS) {
-                
-                std::cout << "IPv6 Vrf Operation: "<< vrfOp << " successful" << std::endl;
+                std::cout << "IPv6 Vrf Operation: "<< vrf_op << " successful" << std::endl;
             } else {
-                std::cout << "Error code for VRF Operation:" << vrfOp << " is 0x" << std::hex << vrfMsgResp.statussummary().status() << std::endl;
+                std::cout << "Error code for VRF Operation:" << vrf_op << " is 0x" << std::hex << vrf_msg_resp.statussummary().status() << std::endl;
 
                 // Print Partial failures within the batch if applicable
-                if (vrfMsgResp.statussummary().status() ==
+                if (vrf_msg_resp.statussummary().status() ==
                         service_layer::SLErrorStatus_SLErrno_SL_SOME_ERR) {
-                    for (int result = 0; result < vrfMsgResp.results_size(); result++) {
-                        auto slerrstatus = static_cast<int>(vrfMsgResp.results(result).errstatus().status());
-                        std::cout << "Error code for vrf " << vrfMsgResp.results(result).vrfname() << " is 0x" << std::hex << slerrstatus << std::endl;
+                    for (int result = 0; result < vrf_msg_resp.results_size(); result++) {
+                        auto slerr_status = static_cast<int>(vrf_msg_resp.results(result).errstatus().status());
+                        std::cout << "Error code for vrf " << vrf_msg_resp.results(result).vrfname() << " is 0x" << std::hex << slerr_status << std::endl;
                     }
                 }
             }
@@ -344,37 +420,37 @@ int main(int argc, char** argv) {
 
     // Wait on the mutex lock
     while (!m_InitSuccess) {
-        std::cout << "Indicator Set" << std::endl;
         m_condVar.wait(mlock);
-        std::cout << "Good to go!" << std::endl;
     }
 
-
-
     SLVrf vrfhandler(grpc::CreateChannel(
-                              "10.0.2.2:57345", grpc::InsecureChannelCredentials()),
-                     service_layer::SL_REGOP_REGISTER);
+                              "10.0.2.2:57345", grpc::InsecureChannelCredentials()));
 
-    vrfhandler.VrfRegMsgAdd("test123", 10, 500);
-    vrfhandler.VrfRegMsgAdd("test1", 12, 500);
-    vrfhandler.VrfRegMsgAdd("test2", 13, 500);
-    vrfhandler.VrfRegMsgAdd("test3", 14, 500);
-    vrfhandler.VrfRegMsgAdd("test4", 15, 500);
-    vrfhandler.VrfRegMsgAdd("test5", 16, 500);
-    vrfhandler.VrfRegMsgAdd("test6", 17, 500);
-    vrfhandler.SendRoutev6VrfRegOp();
-    vrfhandler.SendRoutev4VrfRegOp();
+    // Create a new SLVrfRegMsg batch
+    vrfhandler.vrfRegMsgAdd("test123", 10, 500);
+    vrfhandler.vrfRegMsgAdd("test1", 12, 500);
+    vrfhandler.vrfRegMsgAdd("test2", 13, 500);
+    vrfhandler.vrfRegMsgAdd("test3", 14, 500);
+    vrfhandler.vrfRegMsgAdd("test4", 15, 500);
+    vrfhandler.vrfRegMsgAdd("test5", 16, 500);
+    vrfhandler.vrfRegMsgAdd("test6", 17, 500);
 
-    vrfhandler.vrfMsg.clear_vrfregmsgs();
+    // Register the SLVrfRegMsg batch for v4 and v6
+    vrfhandler.registerVrf(AF_INET);
+    vrfhandler.registerVrf(AF_INET6);
 
-    vrfhandler.VrfRegMsgAdd("test", 10, 500);
-    vrfhandler.VrfRegMsgAdd("test1", 12, 500);
-    vrfhandler.VrfRegMsgAdd("test2", 13, 500);
 
-    vrfhandler.vrfOp = service_layer::SL_REGOP_UNREGISTER;
+    // Clean up the SLVrfRegMsg batch to start again
+    vrfhandler.vrf_msg.clear_vrfregmsgs();
 
-    vrfhandler.SendRoutev6VrfRegOp();
-    vrfhandler.SendRoutev4VrfRegOp();
+    // Creating a fresh SLVrfRegMsg batch
+    vrfhandler.vrfRegMsgAdd("test", 10, 500);
+    vrfhandler.vrfRegMsgAdd("test1", 12, 500);
+    vrfhandler.vrfRegMsgAdd("test2", 13, 500);
+
+    // Unregister the SLVrfRegMsg batch this time
+    vrfhandler.unregisterVrf(AF_INET);
+    vrfhandler.unregisterVrf(AF_INET6);
 
 
     std::cout << "Press control-c to quit" << std::endl << std::endl;
