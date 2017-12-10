@@ -1,6 +1,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <csignal>
 
 #include <grpc++/grpc++.h>
 #include "sl_global.grpc.pb.h" 
@@ -9,7 +10,7 @@
 #include "sl_version.pb.h"
 #include <thread>
 #include <typeinfo>
-
+#include <condition_variable>
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -21,6 +22,10 @@ using grpc::Status;
 using service_layer::SLInitMsg;
 using service_layer::SLVersion;
 using service_layer::SLGlobal;
+
+std::mutex m_mutex;
+std::condition_variable m_condVar;
+bool m_InitSuccess;
 
 class AsyncNotifChannel {
 public:
@@ -49,16 +54,11 @@ public:
 
         // Block until the next result is available in the completion queue "cq".
         while (cq_.Next(&got_tag, &ok)) {
-            // The tag in this example is the memory location of the call object
+            // The tag is the memory location of the call object
             ResponseHandler* responseHandler = static_cast<ResponseHandler*>(got_tag);
-            std::cout << "Tag received: " << responseHandler << std::endl;
 
             // Verify that the request was completed successfully. Note that "ok"
             // corresponds solely to the request for updates introduced by Finish().
-            std::cout << "Next returned: " << ok << std::endl;
-            //AsyncClientCall* callptr = static_cast<AsyncClientCall*>(got_tag);
-            //callptr->response_reader->Read(&notif, (void *)callptr);
-            //std::cout << typeid(notif).name();
             responseHandler->HandleResponse(ok);
         }
     }
@@ -67,12 +67,12 @@ private:
 
     class ResponseHandler {
     public:
-        virtual bool HandleResponse(bool eventStatus) = 0;
+        virtual void HandleResponse(bool eventStatus) = 0;
     };
 
     // struct for keeping state and data information
     class AsyncClientCall: public ResponseHandler {
-        enum CallStatus {CREATE, PROCESS, PROCESSED, FINISH};
+        enum CallStatus {CREATE, PROCESS, FINISH};
         CallStatus callStatus_;
     public:
         AsyncClientCall(): callStatus_(CREATE) {}
@@ -83,15 +83,81 @@ private:
         // the server and/or tweak certain RPC behaviors.
         grpc::ClientContext context;
 
+        // Storage for the status of the RPC upon completion.
+        Status status;
+
         //std::unique_ptr<ClientAsyncResponseReader<HelloReply>> response_reader;
         std::unique_ptr< ::grpc::ClientAsyncReaderInterface< ::service_layer::SLGlobalNotif>> response_reader;
 
-        bool HandleResponse(bool responseStatus) override {
-            std::cout << "Handling response "<< responseStatus << std::endl;
-            response_reader->Read(&notif, (void *)this);
-            std::cout << typeid(notif).name() << std::endl;
-            std::cout << notif.eventtype() << std::endl;
-        }
+        void HandleResponse(bool responseStatus) override {
+            //The First completion queue entry indicates session creation and shouldn't be processed - Check?
+            switch (callStatus_) {
+            case CREATE:
+                if (responseStatus) {
+                    response_reader->Read(&notif, (void*)this);
+                    callStatus_ = PROCESS;
+                } else {
+                    response_reader->Finish(&status, (void*)this);
+                    callStatus_ = FINISH;
+                }
+                break;
+            case PROCESS:
+                if (responseStatus) {
+                    response_reader->Read(&notif, (void *)this);
+                    auto slerrstatus = static_cast<int>(notif.errstatus().status());
+                    auto eventtype = static_cast<int>(notif.eventtype());
+
+                    if( eventtype == static_cast<int>(service_layer::SL_GLOBAL_EVENT_TYPE_VERSION) ) {
+                        if((slerrstatus == 
+                               service_layer::SLErrorStatus_SLErrno_SL_SUCCESS) ||
+                           (slerrstatus == 
+                               service_layer::SLErrorStatus_SLErrno_SL_INIT_STATE_READY) ||
+                           (slerrstatus == 
+                               service_layer::SLErrorStatus_SLErrno_SL_INIT_STATE_CLEAR)) {
+                            std::cout << "Server returned " ; 
+                            std::cout << "Successfully Initialized, connection Established!" << std::endl;
+                            
+                            // Lock the mutex before notifying using the conditional variable
+                            std::lock_guard<std::mutex> guard(m_mutex);
+
+                            // Set the initsuccess flag to indicate successful initialization
+                            m_InitSuccess = true;
+         
+                            // Notify the condition variable;
+                            m_condVar.notify_one();
+
+                        } else {
+                            std::cout << "client init error code " << slerrstatus << std::endl;
+                        }
+                    } else if (eventtype == static_cast<int>(service_layer::SL_GLOBAL_EVENT_TYPE_HEARTBEAT)) {
+                        std::cout << "Received Heartbeat" << std::endl; 
+                    } else if (eventtype == static_cast<int>(service_layer::SL_GLOBAL_EVENT_TYPE_ERROR)) {
+                        if (slerrstatus == service_layer::SLErrorStatus_SLErrno_SL_NOTIF_TERM) {
+                            std::cout << "Received notice to terminate. Client Takeover?" << std::endl;
+                            //response_reader->Finish(&status, (void*)this);
+                            //callStatus_ = FINISH;
+                        } else {
+                            std::cout << "Error Not Handled " << slerrstatus << std::endl;
+                        } 
+                    } else {
+                        std::cout << "client init unrecognized response " << eventtype << std::endl;
+                    }
+                } else {
+                    response_reader->Finish(&status, (void*)this);
+                    callStatus_ = FINISH;
+                }
+                break;
+            case FINISH:
+                if (status.ok()) {
+                    std::cout << "Server Response Completed: " << this << " CallData: " << this << std::endl;
+                }
+                else {
+                    std::cout << "RPC failed" << std::endl;
+                }
+                delete this;
+                std::exit(0);
+            }
+        } 
     };
 
 
@@ -108,6 +174,9 @@ int main(int argc, char** argv) {
     AsyncNotifChannel asynchandler(grpc::CreateChannel(
                               "10.0.2.2:57345", grpc::InsecureChannelCredentials()));
 
+    // Acquire the lock
+    std::unique_lock<std::mutex> mlock(m_mutex);
+
     // Spawn reader thread that loops indefinitely
     std::thread thread_ = std::thread(&AsyncNotifChannel::AsyncCompleteRpc, &asynchandler);
 
@@ -118,10 +187,16 @@ int main(int argc, char** argv) {
     init_msg.set_subver(service_layer::SL_SUB_VERSION);
 
 
-    asynchandler.SendInitMsg(init_msg);  // The actual RPC call!
+    asynchandler.SendInitMsg(init_msg);  
+
+    // Wait on the mutex lock
+    while (!m_InitSuccess) {
+        m_condVar.wait(mlock);
+    }
+
 
     std::cout << "Press control-c to quit" << std::endl << std::endl;
-    thread_.join();  //blocks forever
+    thread_.join();
 
     return 0;
 }
