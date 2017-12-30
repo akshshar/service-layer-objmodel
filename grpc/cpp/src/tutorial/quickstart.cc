@@ -729,101 +729,56 @@ int main(int argc, char** argv) {
         init_condVar.wait(initlock);
     }
 
+    // Set up a new channel for vrf/route messages
+
     SLVrf vrfhandler(grpc::CreateChannel(
                               grpc_server, grpc::InsecureChannelCredentials()));
 
     // Create a new SLVrfRegMsg batch
     vrfhandler.vrfRegMsgAdd("default", 10, 500);
-    //vrfhandler.vrfRegMsgAdd("test1", 12, 500);
-    //vrfhandler.vrfRegMsgAdd("test2", 13, 500);
-    //vrfhandler.vrfRegMsgAdd("test3", 14, 500);
-    //vrfhandler.vrfRegMsgAdd("test4", 15, 500);
-    //vrfhandler.vrfRegMsgAdd("test5", 16, 500);
-    //vrfhandler.vrfRegMsgAdd("test6", 17, 500);
 
     // Register the SLVrfRegMsg batch for v4 and v6
     vrfhandler.registerVrf(AF_INET);
     vrfhandler.registerVrf(AF_INET6);
 
-
-    // Clean up the SLVrfRegMsg batch to start again
-    //vrfhandler.vrf_msg.clear_vrfregmsgs();
-
-    // Creating a fresh SLVrfRegMsg batch
-    //vrfhandler.vrfRegMsgAdd("test", 10, 500);
-    //vrfhandler.vrfRegMsgAdd("test1", 12, 500);
-    //vrfhandler.vrfRegMsgAdd("test2", 13, 500);
-
-    // Unregister the SLVrfRegMsg batch this time
-    //vrfhandler.unregisterVrf(AF_INET);
-    //vrfhandler.unregisterVrf(AF_INET6);
-
-
-
+   
+    // Create an rshuttle object to send route batches 
     auto rshuttle = RShuttle(vrfhandler.channel);
+
+    // Obtain pointer to a v4 route object within route batch
     auto routev4_ptr = rshuttle.routev4Add("default");
 
-    //struct sockaddr_in sa;
-    //if (inet_pton(AF_INET, "20.0.1.0", &(sa.sin_addr)) != 1) {
-    //    std::cout << "Invalid Ipv4 address" <<std::endl;
-    //}
-
-    //std::cout << ntohl(sa.sin_addr.s_addr) << std::endl;
-
-    //folly::IPAddressV4 v4addr("20.0.1.0"); 
-
-
+    // Set up the v4 route object
     rshuttle.routev4Set(routev4_ptr, rshuttle.IPv4ToLong("20.0.1.0") , 24, 120);
 
-    //if (inet_pton(AF_INET, "14.1.1.10", &(sa.sin_addr)) != 1) {
-    //    std::cout << "Invalid Ipv4 address" <<std::endl;
-    //}
+   
+    // Obtain another pointer to a route object within route batch
+    auto routev4_ptr2 = rshuttle.routev4Add("default");
 
-    //std::cout << ntohl(sa.sin_addr.s_addr) << std::endl;
-
-    //folly::IPAddressV4 v4addr1("14.1.1.10"); 
-
-    
+    // Set up the new v4 route object
+    rshuttle.routev4Set(routev4_ptr2, rshuttle.IPv4ToLong("23.0.1.0") , 24, 120);
+ 
+    // Set up the paths for each v4 route object    
     rshuttle.routev4PathAdd(routev4_ptr, rshuttle.IPv4ToLong("14.1.1.10"), "GigabitEthernet0/0/0/0"); 
+    rshuttle.routev4Op(service_layer::SL_OBJOP_ADD);
+    rshuttle.routev4PathAdd(routev4_ptr, rshuttle.IPv4ToLong("15.1.1.10"), "GigabitEthernet0/0/0/1");
     rshuttle.routev4Op(service_layer::SL_OBJOP_ADD);
 
 
+    rshuttle.routev4PathAdd(routev4_ptr2, rshuttle.IPv4ToLong("14.1.1.10"), "GigabitEthernet0/0/0/0");
+    rshuttle.routev4Op(service_layer::SL_OBJOP_ADD);
+    rshuttle.routev4PathAdd(routev4_ptr2, rshuttle.IPv4ToLong("15.1.1.10"), "GigabitEthernet0/0/0/1");
+    rshuttle.routev4Op(service_layer::SL_OBJOP_ADD);
 
+
+    // Obtain pointer to a v6 route object within route batch
 
     auto routev6_ptr = rshuttle.routev6Add("default");
 
-    
-//    folly::IPAddress v6addr("Fb80:dba:100::0");
-
-//    auto bytes = v6addr.asV6().toByteArray();
-
-//    unsigned int ipv6_len = 16;
-
-//    std::string ipv6_string(reinterpret_cast<std::array<unsigned char, 16ul>>(bytes), ipv6_len);
-
-//    std::cout << ipv6_string;
-
-//    rshuttle.routev6Set(routev6_ptr, bytes, 64, 120); 
-
-  
-/*    const char *ipv6str = "2002:aa::0";
-    struct in6_addr ipv6data;
-    inet_pton(AF_INET6, ipv6str, &ipv6data);
-    const char *ptr(reinterpret_cast<const char*>(&ipv6data.s6_addr));
-    std::string ipv6_charstr(ptr, ptr+16);*/
-
+    // Set up the v6 route object 
     rshuttle.routev6Set(routev6_ptr, rshuttle.IPv6ToByteArrayString("2002:aa::0"), 64, 120);
   
-
-   
-   /* const char *ipv6str2 = "2002:ae::3";
-    struct in6_addr ipv6data2;
-    inet_pton(AF_INET6, ipv6str2, &ipv6data2);
-
-
-    std::string ipv6_charstr2(reinterpret_cast<const char*>(&ipv6data2.s6_addr), reinterpret_cast<const char*>(&ipv6data2.s6_addr)+16);*/
- 
-
+    // Set up the path for v6 route object
     rshuttle.routev6PathAdd(routev6_ptr, rshuttle.IPv6ToByteArrayString("2002:ae::3"), "GigabitEthernet0/0/0/0");
     rshuttle.routev6Op(service_layer::SL_OBJOP_ADD);
 
