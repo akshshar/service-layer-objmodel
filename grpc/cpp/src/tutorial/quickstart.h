@@ -1,5 +1,9 @@
 #pragma once
 
+#include <stdint.h>
+#include <thread>
+#include <typeinfo>
+#include <condition_variable>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -7,44 +11,42 @@
 #include <sys/socket.h>
 
 #include <grpc++/grpc++.h>
-#include <openr/servicelayer/sl_global.grpc.pb.h>
-#include <openr/servicelayer/sl_global.pb.h>
-#include <openr/servicelayer/sl_common_types.pb.h>
-#include <openr/servicelayer/sl_version.pb.h>
-#include <openr/servicelayer/sl_route_common.pb.h>
-#include <openr/servicelayer/sl_route_ipv4.grpc.pb.h>
-#include <openr/servicelayer/sl_route_ipv6.grpc.pb.h>
-#include <openr/servicelayer/sl_route_ipv4.pb.h>
-#include <openr/servicelayer/sl_route_ipv6.pb.h>
-#include <stdint.h>
-
-#include <thread>
-#include <typeinfo>
-#include <condition_variable>
-
-namespace openr {
-
+#include <iosxrsl/sl_global.grpc.pb.h>
+#include <iosxrsl/sl_global.pb.h>
+#include <iosxrsl/sl_common_types.pb.h>
+#include <iosxrsl/sl_version.pb.h>
+#include <iosxrsl/sl_route_common.pb.h>
+#include <iosxrsl/sl_route_ipv4.grpc.pb.h>
+#include <iosxrsl/sl_route_ipv6.grpc.pb.h>
+#include <iosxrsl/sl_route_ipv4.pb.h>
+#include <iosxrsl/sl_route_ipv6.pb.h>
 
 extern std::mutex m_mutex;
 extern std::condition_variable m_condVar;
 extern bool m_InitSuccess;
+extern std::shared_ptr<grpc::Channel> route_channel;
 
 class RShuttle {
 public:
     explicit RShuttle(std::shared_ptr<grpc::Channel> Channel);
 
     std::shared_ptr<grpc::Channel> channel;
-    service_layer::SLRegOp route_op;
+    service_layer::SLObjectOp route_op;
     service_layer::SLRoutev4Msg routev4_msg;
     service_layer::SLRoutev4MsgRsp routev4_msg_resp;
     service_layer::SLRoutev6Msg routev6_msg;
     service_layer::SLRoutev6MsgRsp routev6_msg_resp;
 
+    // IPv4 and IPv6 string manipulation methods
+
+    uint32_t IPv4ToLong(const char* address);
+
+    std::string IPv6ToByteArrayString(const char* address);
+
     // IPv4 methods
 
     service_layer::SLRoutev4*
-    routev4Add(service_layer::SLObjectOp routeOp,
-               std::string vrfName);
+    routev4Add(std::string vrfName);
 
     void routev4Set(service_layer::SLRoutev4* routev4Ptr,
                     uint32_t prefix,
@@ -57,14 +59,14 @@ public:
                         std::string nextHopIf);
  
 
-    void routev4Op(unsigned int timeout=10);
+    void routev4Op(service_layer::SLObjectOp routeOp,
+                   unsigned int timeout=10);
 
 
 
     // IPv6 methods
     service_layer::SLRoutev6*
-    routev6Add(service_layer::SLObjectOp routeOp,
-               std::string vrfName);
+    routev6Add(std::string vrfName);
  
 
     void routev6Set(service_layer::SLRoutev6* routev6Ptr,
@@ -77,7 +79,8 @@ public:
                         std::string nextHopIf);
  
 
-    void routev6Op(unsigned int timeout=10);
+    void routev6Op(service_layer::SLObjectOp routeOp,
+                   unsigned int timeout=10);
 
 };
 
@@ -90,6 +93,8 @@ public:
     service_layer::SLRegOp vrf_op;
     service_layer::SLVrfRegMsg vrf_msg;
     service_layer::SLVrfRegMsgRsp vrf_msg_resp;
+
+    void vrfRegMsgAdd(std::string vrfName);
 
     void vrfRegMsgAdd(std::string vrfName,
                       unsigned int adminDistance,
@@ -114,6 +119,13 @@ public:
 
     void AsyncCompleteRpc();
 
+    void Shutdown();
+    void Cleanup();
+
+    std::mutex channel_mutex;
+    std::condition_variable channel_condVar;
+    bool channel_closed = false;
+
 private:
     // Out of the passed in Channel comes the stub, stored here, our view of the
     // server's exposed services.
@@ -123,18 +135,11 @@ private:
     // gRPC runtime.
     grpc::CompletionQueue cq_;
 
+
     // Used as an indicator to exit completion queue thread upon queue shutdown.
-    bool tearDown = false;
+    bool tear_down = false;
 
-
-    class ResponseHandler {
-    public:
-        virtual void HandleResponse(bool eventStatus, grpc::CompletionQueue* pcq_)=0;
-        virtual ~ResponseHandler();
-    };
-
-
-    class AsyncClientCall: public ResponseHandler {
+    class AsyncClientCall {
     private:
         enum CallStatus {CREATE, PROCESS, FINISH};
         CallStatus callStatus_;
@@ -149,13 +154,9 @@ private:
         // Storage for the status of the RPC upon completion.
         grpc::Status status;
 
-        //std::unique_ptr<ClientAsyncResponseReader<HelloReply>> response_reader;
         std::unique_ptr< ::grpc::ClientAsyncReaderInterface< ::service_layer::SLGlobalNotif>> response_reader;
 
-        void HandleResponse(bool responseStatus, grpc::CompletionQueue* pcq_) override;
-        
-    };
+        void HandleResponse(bool responseStatus, grpc::CompletionQueue* pcq_);      
+    }call;
 
 };
-
-}
