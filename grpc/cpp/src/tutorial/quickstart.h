@@ -21,9 +21,9 @@
 #include <iosxrsl/sl_route_ipv4.pb.h>
 #include <iosxrsl/sl_route_ipv6.pb.h>
 
-extern std::mutex m_mutex;
-extern std::condition_variable m_condVar;
-extern bool m_InitSuccess;
+extern std::mutex init_mutex;
+extern std::condition_variable init_condVar;
+extern bool init_success;
 extern std::shared_ptr<grpc::Channel> route_channel;
 
 class RShuttle {
