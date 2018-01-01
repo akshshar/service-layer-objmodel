@@ -1,4 +1,4 @@
-#include "quickstart.h"
+#include "rshuttle.h"
 #include <google/protobuf/text_format.h>
 #include <csignal>
 
@@ -12,11 +12,29 @@ using service_layer::SLInitMsg;
 using service_layer::SLVersion;
 using service_layer::SLGlobal;
 
-
 std::mutex init_mutex;
 std::condition_variable init_condVar;
 bool init_success;
 
+
+std::string RShuttle::longToIpv4(uint32_t nlprefix)
+{
+    struct sockaddr_in sa;
+    char str[INET_ADDRSTRLEN];
+
+    // Convert to hostbyte first form
+    uint32_t hlprefix = htonl(nlprefix);
+
+    sa.sin_addr.s_addr = hlprefix;
+
+    if (inet_ntop(AF_INET,  &(sa.sin_addr), str, INET_ADDRSTRLEN)) {
+        VLOG(2) << "converted value= "<< str;   
+        return std::string(str);                                                                                                                                        
+    } else {
+        LOG(ERROR) << "inet_ntop conversion error: "<< strerror(errno);
+        return std::string("");
+    }
+}
 
 uint32_t RShuttle::ipv4ToLong(const char* address)
 {
@@ -31,7 +49,6 @@ uint32_t RShuttle::ipv4ToLong(const char* address)
 
 std::string RShuttle::ipv6ToByteArrayString(const char* address)
 {
-    //const char *ipv6str = address;
     struct in6_addr ipv6data;
     if (inet_pton(AF_INET6, address, &ipv6data) != 1 ) {
         LOG(ERROR) << "Invalid IPv6 address " << address; 
@@ -43,6 +60,23 @@ std::string RShuttle::ipv6ToByteArrayString(const char* address)
     return ipv6_charstr;
 }
 
+std::string RShuttle::ByteArrayStringtoIpv6(std::string ipv6ByteArray)
+{
+
+    struct in6_addr ipv6data;
+    char str[INET6_ADDRSTRLEN];
+
+    std::copy(ipv6ByteArray.begin(), ipv6ByteArray.end(),ipv6data.s6_addr);
+
+
+    if (inet_ntop(AF_INET6,  &(ipv6data), str, INET6_ADDRSTRLEN)) {
+        VLOG(2) << "converted value= "<< str;
+        return std::string(str);
+    } else {
+        LOG(ERROR) << "inet_ntop conversion error: "<< strerror(errno);
+        return std::string("");
+    }
+}
 
 RShuttle::RShuttle(std::shared_ptr<grpc::Channel> Channel)
     : channel(Channel) {} 
@@ -126,7 +160,7 @@ void RShuttle::routev4Op(service_layer::SLObjectOp routeOp,
 
     if (google::protobuf::TextFormat::PrintToString(routev4_msg, &s)) {
         VLOG(2) << "###########################" ;
-        VLOG(2) << "Transmitted message: IOSXR-SL RouteV4 " << s;
+        VLOG(2) << "Transmitted message: IOSXR-SL Routev4 " << s;
         VLOG(2) << "###########################" ;
     } else {
         VLOG(2) << "###########################" ;
@@ -224,7 +258,11 @@ void RShuttle::clearBatchV4()
 }
 
 
-bool RShuttle::prefixInAppRibV4(std::string vrfName,
+// Returns true if the prefix exists in Application RIB and route
+// gets populated with all the route attributes like Nexthop, adminDistance etc.
+
+bool RShuttle::getPrefixPathsV4(service_layer::SLRoutev4& route,
+                                std::string vrfName,
                                 std::string prefix,
                                 uint32_t prefixLen,
                                 unsigned int timeout)
@@ -284,24 +322,38 @@ bool RShuttle::prefixInAppRibV4(std::string vrfName,
                service_layer::SLErrorStatus_SLErrno_SL_SUCCESS) {
 
             VLOG(1) << "IPv4 Route GET Operation successful";
-//            for (int entry = 0; entry < routev4_get_msg_resp.entries_size(); entry++) {
-                
-//            }
-            //print the Response         
-            std::string s;
 
-            if (google::protobuf::TextFormat::PrintToString(routev4_get_msg_resp, &s)) {
-                VLOG(2) << "###########################" ;
-                VLOG(2) << "Received  message: IOSXR-SL Route Get " << s;
-                VLOG(2) << "###########################" ;
+            // We've only requested one entry for prefix in a particular vrf
+            // If the returned eof flag is set, then not even one entry was returned,
+            // implying the prefix does not exist in the RIB within this vrf.
+
+            if (routev4_get_msg_resp.eof()) {
+                return false;
             } else {
-                VLOG(2) << "###########################" ;
-                VLOG(2) << "Message not valid (partial content: "
-                        << routev4_get_msg_resp.ShortDebugString() << ")";
-                VLOG(2) << "###########################" ;
+                // Successful return and we should get only one entry back
+                if (routev4_get_msg_resp.entries_size() == 1) {
+                    VLOG(1) << "Received the route from RIB";
+                    route = routev4_get_msg_resp.entries(0);
+                    return true;
+                } else {
+                    LOG(ERROR) << "Got more entries than requested, something is wrong";
+                    //print the Response         
+                    std::string s;
 
+                    if (google::protobuf::TextFormat::PrintToString(routev4_get_msg_resp, &s)) {
+                        VLOG(2) << "###########################" ;
+                        VLOG(2) << "Received  message: IOSXR-SL Route Get " << s;
+                        VLOG(2) << "###########################" ;
+                    } else {
+                        VLOG(2) << "###########################" ;
+                        VLOG(2) << "Message not valid (partial content: "
+                                << routev4_get_msg_resp.ShortDebugString() << ")";
+                        VLOG(2) << "###########################" ;
+                    }
+                    return false;
+                }
             }
-            return true;
+
         } else {
             LOG(ERROR) << "Error code for vrf "
                        << routev4_get_msg_resp.vrfname()
@@ -310,11 +362,9 @@ bool RShuttle::prefixInAppRibV4(std::string vrfName,
         }
     } else {
         LOG(ERROR) << "RPC failed, error code is " << status.error_code();
+        return false;
     }
-
-
 }
-
 
 service_layer::SLRoutev6*
     RShuttle::routev6Add(std::string vrfName)
@@ -499,6 +549,113 @@ void RShuttle::clearBatchV6()
    prefix_map_v6.clear();
 }
 
+// Returns true if the prefix exists in Application RIB and route
+// gets populated with all the route attributes like Nexthop, adminDistance etc.
+
+bool RShuttle::getPrefixPathsV6(service_layer::SLRoutev6& route,
+                                std::string vrfName,
+                                std::string prefix,
+                                uint32_t prefixLen,
+                                unsigned int timeout)
+{
+
+    auto stub_ = service_layer::SLRoutev6Oper::NewStub(channel);
+    service_layer::SLRoutev6GetMsg routev6_get_msg;
+    service_layer::SLRoutev6GetMsgRsp routev6_get_msg_resp;
+
+    routev6_get_msg.set_vrfname(vrfName);
+    routev6_get_msg.set_prefix(ipv6ToByteArrayString(prefix.c_str()));
+    routev6_get_msg.set_prefixlen(prefixLen);
+    routev6_get_msg.set_entriescount(1);
+    routev6_get_msg.set_getnext(false);
+
+
+    // Context for the client.
+    grpc::ClientContext context;
+
+    // Storage for the status of the RPC upon completion.
+    grpc::Status status;
+
+    // Set timeout for RPC
+    std::chrono::system_clock::time_point deadline =
+        std::chrono::system_clock::now() + std::chrono::seconds(timeout);
+
+    context.set_deadline(deadline);
+
+
+    //Issue the RPC         
+    std::string s;
+
+    if (google::protobuf::TextFormat::PrintToString(routev6_get_msg, &s)) {
+        VLOG(2) << "###########################" ;
+        VLOG(2) << "Transmitted message: IOSXR-SL Route Get " << s;
+        VLOG(2) << "###########################" ;
+    } else {
+        VLOG(2) << "###########################" ;
+        VLOG(2) << "Message not valid (partial content: "
+                << routev6_get_msg.ShortDebugString() << ")";
+        VLOG(2) << "###########################" ;
+    }
+
+    //Issue the RPC         
+
+    status = stub_->SLRoutev6Get(&context, routev6_get_msg, &routev6_get_msg_resp);
+
+    if (status.ok()) {
+         VLOG(1) << "RPC call was successful, checking response...";
+
+
+        auto slerr_status =
+        static_cast<int>(routev6_get_msg_resp.errstatus().status());
+
+
+        if (slerr_status ==
+               service_layer::SLErrorStatus_SLErrno_SL_SUCCESS) {
+
+            VLOG(1) << "IPv6 Route GET Operation successful";
+
+            // We've only requested one entry for prefix in a particular vrf
+            // If the returned eof flag is set, then not even one entry was returned,
+            // implying the prefix does not exist in the RIB within this vrf.
+
+            if (routev6_get_msg_resp.eof()) {
+                return false;
+            } else {
+                // Successful return and we should get only one entry back
+                if (routev6_get_msg_resp.entries_size() == 1) {
+                    VLOG(1) << "Received the route from RIB";
+                    route = routev6_get_msg_resp.entries(0);
+                    return true;
+                } else {
+                    LOG(ERROR) << "Got more entries than requested, something is wrong";
+                    //print the Response         
+                    std::string s;
+
+                    if (google::protobuf::TextFormat::PrintToString(routev6_get_msg_resp, &s)) {
+                        VLOG(2) << "###########################" ;
+                        VLOG(2) << "Received  message: IOSXR-SL Route Get " << s;
+                        VLOG(2) << "###########################" ;
+                    } else {
+                        VLOG(2) << "###########################" ;
+                        VLOG(2) << "Message not valid (partial content: "
+                                << routev6_get_msg_resp.ShortDebugString() << ")";
+                        VLOG(2) << "###########################" ;
+                    }
+                    return false;
+                }
+            }
+
+        } else {
+            LOG(ERROR) << "Error code for vrf "
+                       << routev6_get_msg_resp.vrfname()
+                       <<" is 0x"<< std::hex << slerr_status;
+            return false;
+        }
+    } else {
+        LOG(ERROR) << "RPC failed, error code is " << status.error_code();
+        return false;
+    }
+}
 
 
 SLVrf::SLVrf(std::shared_ptr<grpc::Channel> Channel)
@@ -914,26 +1071,29 @@ std::string getEnvVar( std::string const & key )
 
 SLVrf* vrfhandler_signum;
 AsyncNotifChannel* asynchandler_signum;
+bool sighandle_initiated = false;
 
 void signalHandler( int signum ) {
-   VLOG(1) << "Interrupt signal (" << signum << ") received.";
+   if (!sighandle_initiated) {
+       sighandle_initiated = true;
+       VLOG(1) << "Interrupt signal (" << signum << ") received.";
 
-   // Clear out the last vrfRegMsg batch
-   vrfhandler_signum->vrf_msg.clear_vrfregmsgs();
+       // Clear out the last vrfRegMsg batch
+       vrfhandler_signum->vrf_msg.clear_vrfregmsgs();
 
-   // Create a fresh SLVrfRegMsg batch for cleanup
-   vrfhandler_signum->vrfRegMsgAdd("default");
+       // Create a fresh SLVrfRegMsg batch for cleanup
+       vrfhandler_signum->vrfRegMsgAdd("default");
 
-   vrfhandler_signum->unregisterVrf(AF_INET);
-   vrfhandler_signum->unregisterVrf(AF_INET6);
+       vrfhandler_signum->unregisterVrf(AF_INET);
+       vrfhandler_signum->unregisterVrf(AF_INET6);
 
  
-   // Shutdown the Async Notification Channel  
-   asynchandler_signum->Shutdown();
+       // Shutdown the Async Notification Channel  
+       asynchandler_signum->Shutdown();
 
-   // terminate program  
-
-   exit(signum);  
+       //terminate program  
+       exit(signum);  
+    } 
 }
 
 
@@ -1008,7 +1168,19 @@ int main(int argc, char** argv) {
     // Clear the batch before the next operation
     rshuttle.clearBatchV4();
 
-    rshuttle.prefixInAppRibV4("default", "31.0.1.0", 24);
+    service_layer::SLRoutev4 routev4;
+    bool response = rshuttle.getPrefixPathsV4(routev4,"default", "30.0.1.0", 24);
+
+    LOG(INFO) << "Prefix " << rshuttle.longToIpv4(routev4.prefix());
+/*    for(int path_cnt=0; path_cnt < routev4.pathlist_size(); path_cnt++) {
+        LOG(INFO) << "NextHop Interface: " 
+                  << routev4.pathlist(path_cnt).nexthopinterface().name();
+      
+        LOG(INFO) << "NextHop Address " 
+                  << rshuttle.longToIpv4(routev4.pathlist(path_cnt).nexthopaddress().v4address());
+    } */   
+
+
 
 
     // Create a v6 route batch, same principle as v4
@@ -1020,6 +1192,20 @@ int main(int argc, char** argv) {
 
     // Clear the batch before the next operation
     rshuttle.clearBatchV6();
+
+
+    service_layer::SLRoutev6 routev6;
+    response = rshuttle.getPrefixPathsV6(routev6,"default", "2002:aa::0", 64);
+
+    LOG(INFO) << "Prefix " << rshuttle.ByteArrayStringtoIpv6(routev6.prefix());
+    int path_cnt=0;
+//    for(int path_cnt=0; path_cnt < routev6.pathlist_size(); path_cnt++) {
+        LOG(INFO) << "NextHop Interface: "
+                  << routev6.pathlist(path_cnt).nexthopinterface().name();
+
+        LOG(INFO) << "NextHop Address "
+                  << rshuttle.ByteArrayStringtoIpv6(routev6.pathlist(path_cnt).nexthopaddress().v6address());
+//    }
 
 
     // Let's create a delete route batch for v4 

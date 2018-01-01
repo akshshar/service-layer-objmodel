@@ -45,9 +45,10 @@ public:
 
     // IPv4 and IPv6 string manipulation methods
 
+    std::string longToIpv4(uint32_t nlprefix);
     uint32_t ipv4ToLong(const char* address);
     std::string ipv6ToByteArrayString(const char* address);
-
+    std::string ByteArrayStringtoIpv6(std::string ipv6ByteArray);
 
     // IPv4 methods
 
@@ -89,7 +90,11 @@ public:
     void clearBatchV4();
 
 
-    bool prefixInAppRibV4(std::string vrfName,
+    // Returns true if the prefix exists in Application RIB and route
+    // gets populated with all the route attributes like Nexthop, adminDistance etc.
+
+    bool getPrefixPathsV4(service_layer::SLRoutev4& route,
+                          std::string vrfName,
                           std::string prefix,
                           uint32_t prefixLen,
                           unsigned int timeout=10);
@@ -132,9 +137,15 @@ public:
 
     void clearBatchV6();
 
-    void prefixInAppRibV6(std::string vrfName,
+    // Returns true if the prefix exists in Application RIB and route
+    // gets populated with all the route attributes like Nexthop, adminDistance etc.
+    bool getPrefixPathsV6(service_layer::SLRoutev6& route,
+                          std::string vrfName,
                           std::string prefix,
-                          uint32_t prefixLen);
+                          uint32_t prefixLen,
+                          unsigned int timeout=10);
+
+
 };
 
 
