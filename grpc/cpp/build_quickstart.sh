@@ -51,9 +51,19 @@ if [[ $GRPC_INSTALLED_VERSION != $GRPC_VERSION  || \
         sudo make install 
     fi
  
-    cd ~/ && rm -rf ~/tempdir
 fi
 
+
+# Install glog
+
+if [[ `pkg-config --exists glog` ]]; then
+    git clone https://github.com/google/glog.git ~/tempdir/glog
+    cd ~/tempdir/glog
+    ./autogen.sh && ./configure && make && sudo make install && sudo ldconfig
+fi
+
+# Clean up
+cd ~/ && rm -rf ~/tempdir
 
 # Clean up first
 cd $SCRIPT_DIR
@@ -67,6 +77,8 @@ cd ../../
 
 # Drop into the src directory to build and install the service layer bindings as a static library libiosxrsl.a
 cd ./src
+# Create the genobj directory
+mkdir -p genobj
 make
 sudo make install
 

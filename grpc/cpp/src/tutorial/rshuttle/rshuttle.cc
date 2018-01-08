@@ -1,6 +1,7 @@
 #include "rshuttle.h"
 #include <google/protobuf/text_format.h>
 #include <csignal>
+#include <ctime>
 
 using grpc::ClientContext;
 using grpc::ClientReader;
@@ -17,6 +18,16 @@ std::condition_variable init_condVar;
 bool init_success;
 
 
+uint32_t incrementIpv4Pfx(uint32_t prefix, uint32_t prefixLen) {
+    if (prefixLen > 32) {
+        LOG(ERROR) << "PrefixLen > 32";
+    }
+
+    auto offset = 1 << 32 - prefixLen;
+ 
+    return prefix + offset;
+}
+
 std::string RShuttle::longToIpv4(uint32_t nlprefix)
 {
     struct sockaddr_in sa;
@@ -28,7 +39,7 @@ std::string RShuttle::longToIpv4(uint32_t nlprefix)
     sa.sin_addr.s_addr = hlprefix;
 
     if (inet_ntop(AF_INET,  &(sa.sin_addr), str, INET_ADDRSTRLEN)) {
-        VLOG(2) << "converted value= "<< str;   
+        VLOG(4) << "converted value= "<< str;   
         return std::string(str);                                                                                                                                        
     } else {
         LOG(ERROR) << "inet_ntop conversion error: "<< strerror(errno);
@@ -159,14 +170,14 @@ void RShuttle::routev4Op(service_layer::SLObjectOp routeOp,
     std::string s;
 
     if (google::protobuf::TextFormat::PrintToString(routev4_msg, &s)) {
-        VLOG(2) << "###########################" ;
-        VLOG(2) << "Transmitted message: IOSXR-SL Routev4 " << s;
-        VLOG(2) << "###########################" ;
+        VLOG(3) << "###########################" ;
+        VLOG(3) << "Transmitted message: IOSXR-SL Routev4 " << s;
+        VLOG(3) << "###########################" ;
     } else {
-        VLOG(2) << "###########################" ;
-        VLOG(2) << "Message not valid (partial content: "
+        VLOG(3) << "###########################" ;
+        VLOG(3) << "Message not valid (partial content: "
                   << routev4_msg.ShortDebugString() << ")";
-        VLOG(2) << "###########################" ;
+        VLOG(3) << "###########################" ;
     }
 
     status = stub_->SLRoutev4Op(&context, routev4_msg, &routev4_msg_resp);
@@ -1157,9 +1168,7 @@ int main(int argc, char** argv) {
 
     // Insert routes - prefix, prefixlen, admindistance, nexthopaddress, nexthopif one by one
     rshuttle.insertAddBatchV4("default", "20.0.1.0", 24, 120, "14.1.1.10","GigabitEthernet0/0/0/0");
-    rshuttle.insertAddBatchV4("default", "20.0.1.0", 24, 120, "15.1.1.10","GigabitEthernet0/0/0/1");
     rshuttle.insertAddBatchV4("default", "23.0.1.0", 24, 120, "14.1.1.10","GigabitEthernet0/0/0/0");
-    rshuttle.insertAddBatchV4("default", "23.0.1.0", 24, 120, "15.1.1.10","GigabitEthernet0/0/0/1");
     rshuttle.insertAddBatchV4("default", "30.0.1.0", 24, 120, "14.1.1.10","GigabitEthernet0/0/0/0");
 
     // Push route batch into the IOS-XR RIB
@@ -1172,20 +1181,12 @@ int main(int argc, char** argv) {
     bool response = rshuttle.getPrefixPathsV4(routev4,"default", "30.0.1.0", 24);
 
     LOG(INFO) << "Prefix " << rshuttle.longToIpv4(routev4.prefix());
-/*    for(int path_cnt=0; path_cnt < routev4.pathlist_size(); path_cnt++) {
-        LOG(INFO) << "NextHop Interface: " 
-                  << routev4.pathlist(path_cnt).nexthopinterface().name();
-      
-        LOG(INFO) << "NextHop Address " 
-                  << rshuttle.longToIpv4(routev4.pathlist(path_cnt).nexthopaddress().v4address());
-    } */   
 
 
 
 
     // Create a v6 route batch, same principle as v4
     rshuttle.insertAddBatchV6("default", "2002:aa::0", 64, 120, "2002:ae::3", "GigabitEthernet0/0/0/0");
-    rshuttle.insertAddBatchV6("default", "2003:aa::0", 64, 120, "2002:ae::4", "GigabitEthernet0/0/0/1");
 
     // Push route batch into the IOS-XR RIB
     rshuttle.routev6Op(service_layer::SL_OBJOP_ADD);
@@ -1199,13 +1200,13 @@ int main(int argc, char** argv) {
 
     LOG(INFO) << "Prefix " << rshuttle.ByteArrayStringtoIpv6(routev6.prefix());
     int path_cnt=0;
-//    for(int path_cnt=0; path_cnt < routev6.pathlist_size(); path_cnt++) {
+    for(int path_cnt=0; path_cnt < routev6.pathlist_size(); path_cnt++) {
         LOG(INFO) << "NextHop Interface: "
                   << routev6.pathlist(path_cnt).nexthopinterface().name();
 
         LOG(INFO) << "NextHop Address "
                   << rshuttle.ByteArrayStringtoIpv6(routev6.pathlist(path_cnt).nexthopaddress().v6address());
-//    }
+    }
 
 
     // Let's create a delete route batch for v4 
@@ -1218,6 +1219,30 @@ int main(int argc, char** argv) {
     // Clear the batch before the next operation
     rshuttle.clearBatchV4();
 
+
+    LOG(INFO) << "Starting Route batch";
+
+    std::string prefix_str = "40.0.0.0";
+    auto prefix = rshuttle.ipv4ToLong(prefix_str.c_str()); 
+    uint8_t prefix_len = 24;
+
+    const clock_t begin_time = clock();
+    unsigned int totalroutes = 0;
+    for (int batchindex = 0; batchindex < 100; batchindex++) {
+        std::cout << "Batch"<< batchindex << ": " << rshuttle.longToIpv4(prefix) << std::endl;
+        for (int routeindex = 0; routeindex < 1000; routeindex++, prefix=incrementIpv4Pfx(prefix, prefix_len)) {
+            rshuttle.insertAddBatchV4("default", rshuttle.longToIpv4(prefix), prefix_len, 99, "11.1.1.10", "GigabitEthernet0/0/0/0");
+            totalroutes++;
+        }
+        rshuttle.routev4Op(service_layer::SL_OBJOP_UPDATE,100);
+        rshuttle.clearBatchV4();
+    }
+
+    std::cout << "Time taken to program 100000 routes" << std::endl;
+    auto time_taken = float(clock() - begin_time)/CLOCKS_PER_SEC; 
+    std::cout << time_taken << std::endl;
+    std::cout << "Route programming rate" << std::endl;
+    std::cout << float(totalroutes)/time_taken<< std::endl;
 
     vrfhandler_signum = &vrfhandler;
     asynchandler_signum = &asynchandler;

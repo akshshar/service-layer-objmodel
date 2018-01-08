@@ -1,8 +1,8 @@
 TARGET := quickstart
-SRC_FILES := $(wildcard *.cc)
-OBJ_FILES := $(patsubst %.cc,%.o,$(SRC_FILES))
-LDFLAGS := -L/usr/local/lib -I/usr/local/include -lgrpc++_unsecure -lgrpc -lprotobuf -lpthread -ldl -liosxrsl
-CPPFLAGS := -g -std=c++14 -I/usr/local/include -pthread
+SRC_FILES := quickstart.cc
+OBJ_FILES := quickstart.o 
+LDFLAGS := -L/usr/local/lib -L/usr/local/lib/iosxrsl -I/usr/local/include -lgrpc++_unsecure -lgrpc -lprotobuf -lpthread -ldl -liosxrsl
+CPPFLAGS := -g -std=c++11 -I/usr/local/include -pthread
 
 .PHONY: all
 all: $(TARGET)
