@@ -1,36 +1,23 @@
 #pragma once
 
-#include <stdint.h>
-#include <thread>
-#include <typeinfo>
-#include <condition_variable>
-#include <iostream>
-#include <memory>
-#include <string>
-#include <csignal>
-#include <sys/socket.h>
-#include <glog/logging.h>
-#include <arpa/inet.h>
-
-#include <grpc++/grpc++.h>
-#include <iosxrsl/sl_global.grpc.pb.h>
-#include <iosxrsl/sl_global.pb.h>
-#include <iosxrsl/sl_common_types.pb.h>
-#include <iosxrsl/sl_version.pb.h>
+#include "ServiceLayerAsyncInit.h"
 #include <iosxrsl/sl_route_common.pb.h>
 #include <iosxrsl/sl_route_ipv4.grpc.pb.h>
 #include <iosxrsl/sl_route_ipv6.grpc.pb.h>
 #include <iosxrsl/sl_route_ipv4.pb.h>
 #include <iosxrsl/sl_route_ipv6.pb.h>
 
-extern std::mutex init_mutex;
-extern std::condition_variable init_condVar;
-extern bool init_success;
-extern std::shared_ptr<grpc::Channel> route_channel;
-
+class RShuttle;
+extern RShuttle* route_shuttle;
 class RShuttle {
 public:
     explicit RShuttle(std::shared_ptr<grpc::Channel> Channel);
+
+    enum PathUpdateAction
+    {
+        RSHUTTLE_PATH_ADD,
+        RSHUTTLE_PATH_DELETE,
+    };
 
     std::shared_ptr<grpc::Channel> channel;
     service_layer::SLObjectOp route_op;
@@ -52,17 +39,23 @@ public:
 
     // IPv4 methods
 
+    void setVrfV4(std::string vrfName);
+
+
+    service_layer::SLRoutev4*
+    routev4Add();
+
     service_layer::SLRoutev4*
     routev4Add(std::string vrfName);
 
 
     void routev4Set(service_layer::SLRoutev4* routev4Ptr,
                     uint32_t prefix,
-                    uint32_t prefixLen);
+                    uint8_t prefixLen);
 
     void routev4Set(service_layer::SLRoutev4* routev4Ptr,
                     uint32_t prefix,
-                    uint32_t prefixLen,
+                    uint8_t prefixLen,
                     uint32_t adminDistance); 
 
 
@@ -71,22 +64,33 @@ public:
                         std::string nextHopIf);
  
 
-    void routev4Op(service_layer::SLObjectOp routeOp,
+    bool routev4Op(service_layer::SLObjectOp routeOp,
                    unsigned int timeout=10);
 
 
-    void insertAddBatchV4(std::string vrfName,
-                          std::string prefix,
-                          uint32_t prefixLen,
+    bool insertAddBatchV4(std::string prefix,
+                          uint8_t prefixLen,
                           uint32_t adminDistance,
                           std::string nextHopAddress,
                           std::string nextHopIf);
 
-    void insertDeleteBatchV4(std::string vrfName,
-                             std::string prefix,
-                             uint32_t prefixLen);
+    bool insertDeleteBatchV4(std::string prefix,
+                             uint8_t prefixLen);
 
-    
+
+    bool insertUpdateBatchV4(std::string prefix,
+                             uint8_t prefixLen,
+                             std::string nextHopAddress,
+                             std::string nextHopIf,
+                             PathUpdateAction action);
+
+    bool insertUpdateBatchV4(std::string prefix,
+                             uint8_t prefixLen,
+                             uint32_t adminDistance,
+                             std::string nextHopAddress,
+                             std::string nextHopIf,
+                             PathUpdateAction action);    
+
     void clearBatchV4();
 
 
@@ -96,23 +100,39 @@ public:
     bool getPrefixPathsV4(service_layer::SLRoutev4& route,
                           std::string vrfName,
                           std::string prefix,
-                          uint32_t prefixLen,
+                          uint8_t prefixLen,
                           unsigned int timeout=10);
 
+    bool addPrefixPathV4(std::string prefix,
+                         uint8_t prefixLen,
+                         std::string nextHopAddress,
+                         std::string nextHopIf);
+
+    bool deletePrefixPathV4(std::string prefix,
+                            uint8_t prefixLen,
+                            std::string nextHopAddress,
+                            std::string nextHopIf);
 
     // IPv6 methods
+
+    void setVrfV6(std::string vrfName);
+
+
+    service_layer::SLRoutev6*
+    routev6Add();
+
     service_layer::SLRoutev6*
     routev6Add(std::string vrfName);
  
 
     void routev6Set(service_layer::SLRoutev6* routev6Ptr,
                     std::string prefix,
-                    uint32_t prefixLen);
+                    uint8_t prefixLen);
 
 
     void routev6Set(service_layer::SLRoutev6* routev6Ptr,
                     std::string prefix,
-                    uint32_t prefixLen,
+                    uint8_t prefixLen,
                     uint32_t adminDistance);
 
     void routev6PathAdd(service_layer::SLRoutev6* routev6Ptr,
@@ -120,19 +140,30 @@ public:
                         std::string nextHopIf);
  
 
-    void routev6Op(service_layer::SLObjectOp routeOp,
+    bool routev6Op(service_layer::SLObjectOp routeOp,
                    unsigned int timeout=10);
 
-    void insertAddBatchV6(std::string vrfName,
-                          std::string prefix,
-                          uint32_t prefixLen,
+    bool insertAddBatchV6(std::string prefix,
+                          uint8_t prefixLen,
                           uint32_t adminDistance,
                           std::string nextHopAddress,
                           std::string nextHopIf);
 
-    void insertDeleteBatchV6(std::string vrfName,
-                             std::string prefix,
-                             uint32_t prefixLen);
+    bool insertDeleteBatchV6(std::string prefix,
+                             uint8_t prefixLen);
+
+    bool insertUpdateBatchV6(std::string prefix,
+                             uint8_t prefixLen,
+                             std::string nextHopAddress,
+                             std::string nextHopIf,
+                             PathUpdateAction action);
+
+    bool insertUpdateBatchV6(std::string prefix,
+                             uint8_t prefixLen,
+                             uint32_t adminDistance,
+                             std::string nextHopAddress,
+                             std::string nextHopIf,
+                             PathUpdateAction action); 
 
 
     void clearBatchV6();
@@ -142,10 +173,18 @@ public:
     bool getPrefixPathsV6(service_layer::SLRoutev6& route,
                           std::string vrfName,
                           std::string prefix,
-                          uint32_t prefixLen,
+                          uint8_t prefixLen,
                           unsigned int timeout=10);
 
+    bool addPrefixPathV6(std::string prefix,
+                         uint8_t prefixLen,
+                         std::string nextHopAddress,
+                         std::string nextHopIf);
 
+    bool deletePrefixPathV6(std::string prefix,
+                            uint8_t prefixLen,
+                            std::string nextHopAddress,
+                            std::string nextHopIf);
 };
 
 
@@ -163,63 +202,12 @@ public:
                       unsigned int adminDistance,
                       unsigned int vrfPurgeIntervalSeconds);
 
-    void registerVrf(unsigned int addrFamily);
+    bool registerVrf(unsigned int addrFamily);
 
-    void unregisterVrf(unsigned int addrFamily);
+    bool unregisterVrf(unsigned int addrFamily);
 
-    void vrfOpv4(service_layer::SLRegOp);
+    bool vrfOpv4(service_layer::SLRegOp);
 
-    void vrfOpv6(service_layer::SLRegOp);
-
-};
-
-
-class AsyncNotifChannel {
-public:
-    explicit AsyncNotifChannel(std::shared_ptr<grpc::Channel> channel);
-
-    void SendInitMsg(const service_layer::SLInitMsg init_msg);
-
-    void AsyncCompleteRpc();
-
-    void Shutdown();
-    void Cleanup();
-
-    std::mutex channel_mutex;
-    std::condition_variable channel_condVar;
-    bool channel_closed = false;
-
-private:
-    // Out of the passed in Channel comes the stub, stored here, our view of the
-    // server's exposed services.
-    std::unique_ptr<service_layer::SLGlobal::Stub> stub_;
-
-    // The producer-consumer queue we use to communicate asynchronously with the
-    // gRPC runtime.
-    grpc::CompletionQueue cq_;
-
-
-    // Used as an indicator to exit completion queue thread upon queue shutdown.
-    bool tear_down = false;
-
-    class AsyncClientCall {
-    private:
-        enum CallStatus {CREATE, PROCESS, FINISH};
-        CallStatus callStatus_;
-    public:
-        AsyncClientCall();
-        // Container for the data we expect from the server.
-        service_layer::SLGlobalNotif notif;
-        // Context for the client. It could be used to convey extra information to
-        // the server and/or tweak certain RPC behaviors.
-        grpc::ClientContext context;
-
-        // Storage for the status of the RPC upon completion.
-        grpc::Status status;
-
-        std::unique_ptr< ::grpc::ClientAsyncReaderInterface< ::service_layer::SLGlobalNotif>> response_reader;
-
-        void HandleResponse(bool responseStatus, grpc::CompletionQueue* pcq_);      
-    }call;
+    bool vrfOpv6(service_layer::SLRegOp);
 
 };

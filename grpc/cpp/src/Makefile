@@ -9,7 +9,7 @@ OBJ_FILES := $(patsubst gencpp/%.cc,genobj/%.o,$(SRC_FILES))
 INC_FILES := $(wildcard gencpp/*.h)
 
 .PHONY: all
-all: $(GEN_BINDINGS) $(TARGET_LIB)
+all: $(TARGET_LIB)
 
 genobj/%.o: gencpp/%.cc
 	g++ $(CPPFLAGS) -c -o $@ $<

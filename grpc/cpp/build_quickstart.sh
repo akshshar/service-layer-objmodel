@@ -67,12 +67,9 @@ cd ~/ && rm -rf ~/tempdir
 
 # Clean up first
 cd $SCRIPT_DIR
-echo $PWD
-cd ./src && make clean
-cd ./tutorial && make clean
+./clean.sh
 
 # Create the c++ bindings from proto files
-cd ../../
 ./gen-bindings.sh
 
 # Drop into the src directory to build and install the service layer bindings as a static library libiosxrsl.a
@@ -85,3 +82,7 @@ sudo make install
 # Drop into the tutorial directory to build quickstart that links to libiosxrsl.a
 cd ./tutorial
 make
+
+cd ./rshuttle
+make
+
