@@ -1,5 +1,8 @@
 #!/bin/bash
 
-cd ./src && make clean
-cd ./tutorial && make clean
-cd ./rshuttle && make clean
+set -x
+SCRIPT_DIR="$(cd "$(dirname "${0}")"; echo "$(pwd)")"
+
+cd $SCRIPT_DIR/src && make clean
+cd $SCRIPT_DIR/src/tutorial && make clean
+cd $SCRIPT_DIR/src/tutorial/rshuttle && make clean

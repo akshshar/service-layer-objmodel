@@ -21,8 +21,8 @@ SCRIPT_DIR="$(cd "$(dirname "${0}")"; echo "$(pwd)")"
 
 if [[ $GRPC_INSTALLED_VERSION != $GRPC_VERSION  || \
           $PROTOBUF_INSTALLED_VERSION != $PROTOBUF_VERSION ]]; then 
-    sudo -E apt-get update && sudo -E apt-get install -y \
-         autoconf automake libtool curl make g++ unzip git
+    apt-get update && apt-get install -y \
+         autoconf automake libtool curl make g++ unzip git pkg-config
 
     rm -rf ~/tempdir
     mkdir -p ~/tempdir/
@@ -36,8 +36,8 @@ if [[ $GRPC_INSTALLED_VERSION != $GRPC_VERSION  || \
         ./autogen.sh && \
         ./configure && \
         make && \
-        sudo make install &&\
-        sudo ldconfig 
+        make install &&\
+        ldconfig 
 
     fi
 
@@ -48,7 +48,7 @@ if [[ $GRPC_INSTALLED_VERSION != $GRPC_VERSION  || \
         git checkout $GRPC_HASH && \
         git submodule update --init && \
         make && \
-        sudo make install 
+        make install 
     fi
  
 fi
@@ -56,33 +56,37 @@ fi
 
 # Install glog
 
-if [[ `pkg-config --exists glog` ]]; then
+if ! ldconfig -p | grep -q glog; then
     git clone https://github.com/google/glog.git ~/tempdir/glog
     cd ~/tempdir/glog
-    ./autogen.sh && ./configure && make && sudo make install && sudo ldconfig
+    ./autogen.sh && ./configure && make && make install && ldconfig
 fi
-
 # Clean up
 cd ~/ && rm -rf ~/tempdir
 
 # Clean up first
-cd $SCRIPT_DIR
-./clean.sh
+$SCRIPT_DIR/clean.sh
 
 # Create the c++ bindings from proto files
+cd $SCRIPT_DIR
 ./gen-bindings.sh
 
 # Drop into the src directory to build and install the service layer bindings as a static library libiosxrsl.a
-cd ./src
-# Create the genobj directory
-mkdir -p genobj
-make
-sudo make install
+cd $SCRIPT_DIR/src
+mkdir -p /usr/local/lib/iosxrsl/
+mkdir -p /usr/local/include/iosxrsl/
+
+if [ ! -f /usr/local/lib/iosxrsl/libiosxrsl.a ]; then
+    # Create the genobj directory
+    mkdir -p genobj
+    make
+    make install
+fi
 
 # Drop into the tutorial directory to build quickstart that links to libiosxrsl.a
-cd ./tutorial
+cd $SCRIPT_DIR/src/tutorial
 make
 
-cd ./rshuttle
+cd $SCRIPT_DIR/src/tutorial/rshuttle
 make
 

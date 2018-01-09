@@ -96,7 +96,7 @@ void routepush(RShuttle* route_shuttle,
     unsigned int totalroutes;
 
     for (int batchindex = 0; batchindex < batchNum; batchindex++) {
-        VLOG(1) << "Batch 2" << std::endl;
+        VLOG(1) << "Batch: " << (batchindex + 1) << "\n";
         VLOG(1) << tmr.elapsed();
         for (int routeindex = 0; routeindex < batchSize; routeindex++, prefix=incrementIpv4Pfx(prefix, prefix_len)) {
             route_shuttle->insertAddBatchV4(route_shuttle->longToIpv4(prefix), prefix_len, 99, "14.1.1.10", "GigabitEthernet0/0/0/0");

@@ -1,7 +1,7 @@
 TARGET := servicelayermain 
 SRC_FILES := $(wildcard *.cpp)
 OBJ_FILES := $(patsubst %.cpp,%.o,$(SRC_FILES))
-LDFLAGS := -L/usr/local/lib -I/usr/local/include -lgrpc++_unsecure -lgrpc -lprotobuf -lpthread -ldl -liosxrsl -lglog 
+LDFLAGS := -L/usr/local/lib -L/usr/local/lib/iosxrsl -I/usr/local/include -lgrpc++_unsecure -lgrpc -lprotobuf -lpthread -ldl -liosxrsl -lglog 
 CPPFLAGS := -g -std=c++11 -I/usr/local/include -pthread
 
 .PHONY: all
