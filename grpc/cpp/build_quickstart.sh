@@ -21,7 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "${0}")"; echo "$(pwd)")"
 
 if [[ $GRPC_INSTALLED_VERSION != $GRPC_VERSION  || \
           $PROTOBUF_INSTALLED_VERSION != $PROTOBUF_VERSION ]]; then 
-    sudo apt-get update && sudo apt-get install -y \
+    sudo -E apt-get update && sudo -E apt-get install -y \
          autoconf automake libtool curl make g++ unzip git
 
     rm -rf ~/tempdir
