@@ -85,6 +85,7 @@ if [ ! -f /usr/local/lib/iosxrsl/libiosxrsl.a ]; then
     mkdir -p genobj
     make
     make install
+    ldconfig
 fi
 
 # Drop into the tutorial directory to build quickstart that links to libiosxrsl.a
