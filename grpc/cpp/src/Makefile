@@ -2,7 +2,7 @@ CPPFLAGS := -g -std=c++11 -I/usr/local/include -pthread
 RM = rm -f  # rm command
 TARGET_LIB = libiosxrsl.a # target lib
 LIBDIR = /usr/local/lib/
-INCLUDEDIR = /usr/local/include/
+INCLUDEDIR = /usr/local/include/iosxrsl
 
 SRC_FILES := $(wildcard gencpp/*.cc)
 OBJ_FILES := $(patsubst gencpp/%.cc,genobj/%.o,$(SRC_FILES))

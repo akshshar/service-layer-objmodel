@@ -68,6 +68,7 @@ cd $SCRIPT_DIR
 
 # Drop into the src directory to build and install the service layer bindings as a static library libiosxrsl.a
 cd $SCRIPT_DIR/src
+mkdir -p /usr/local/lib/iosxrsl
 
 if [ ! -f /usr/local/lib/libiosxrsl.a ]; then
     # Create the genobj directory
