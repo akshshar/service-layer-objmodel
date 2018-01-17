@@ -8,6 +8,8 @@ set -x
 
 SCRIPT_DIR="$(cd "$(dirname "${0}")"; echo "$(pwd)")"
 
+./build_libiosxrsl.sh
+
 mkdir -p ~/tempdir
 
 # Install glog
