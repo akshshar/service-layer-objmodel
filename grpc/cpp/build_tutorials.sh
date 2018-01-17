@@ -19,10 +19,14 @@ GRPC_HASH=80893242c1ee929d19e6bec5dc19a1515cd8dd81
 
 SCRIPT_DIR="$(cd "$(dirname "${0}")"; echo "$(pwd)")"
 
+
+# Install pkg-config first
+apt-get update && apt-get install -y pkg-config
+
 if [[ $GRPC_INSTALLED_VERSION != $GRPC_VERSION  || \
           $PROTOBUF_INSTALLED_VERSION != $PROTOBUF_VERSION ]]; then 
     apt-get update && apt-get install -y \
-         autoconf automake libtool curl make g++ unzip git pkg-config
+         autoconf automake libtool curl make g++ unzip git
 
     rm -rf ~/tempdir
     mkdir -p ~/tempdir/
